@@ -448,6 +448,42 @@ Based on the saved `.md` artifacts in this repo:
 - The planning task is the closest thing to a neutral result: both paths produce usable output, but the direct LLM path does so with much lower cost.
 - The PDF task is the strongest warning case for both approaches: the direct LLM path is fast but returns the wrong speaker, and the RLM path collapses entirely.
 
+## Saved Screenshots
+
+### Launch Note App
+
+From `rlm-test/assets/test-launch-note-app/`:
+
+![Launch Note App - Terminal Metrics](rlm-test/assets/test-launch-note-app/test-launch-note-app-terminal-metrics.png)
+![Launch Note App - UI Metrics Panel](rlm-test/assets/test-launch-note-app/test-launch-note-app-metrics-ui.png)
+
+### Battle of the Bastards Failure Trace
+
+From `rlm-test/test3-rlms.md`:
+
+![Test 3 - Iteration View](rlm-test/assets/test3-rlms/test3-iteration-view.png)
+![Test 3 - Code Execution + Sub-call](rlm-test/assets/test3-rlms/test3-code-execution-subcall.png)
+![Test 3 - Final Answer + Metrics (1)](rlm-test/assets/test3-rlms/test3-final-answer-metrics-1.png)
+![Test 3 - Final Answer + Metrics (2)](rlm-test/assets/test3-rlms/test3-final-answer-metrics-2.png)
+![Test 3 - Script Setup (Part 1)](rlm-test/assets/test3-rlms/test3-script-setup-1.png)
+![Test 3 - Script Setup (Part 2)](rlm-test/assets/test3-rlms/test3-script-setup-2.png)
+![Test 3 - Run Start + Iteration 1](rlm-test/assets/test3-rlms/test3-run-start-iteration-1.png)
+![Test 3 - Iteration 2 Analysis](rlm-test/assets/test3-rlms/test3-iteration-2-analysis.png)
+![Test 3 - Iteration 3 + Final Panel](rlm-test/assets/test3-rlms/test3-iteration-3-final-panel.png)
+![Test 3 - Final Output + Traceback](rlm-test/assets/test3-rlms/test3-traceback-snapshot.png)
+
+### Baseline LLM Outputs
+
+![Baseline - llm-test2.py-parth output](llm-test/assets/llm-test2/llm-test2-parth-output.png)
+![Baseline - llm-testing-1-parth output](llm-test/assets/llm-test1/llm-testing-1-parth-output.png)
+
+### Long-Context and Clinical Runs
+
+![Long Context - test_long_context_authproxy output](rlm-test/assets/test-long-context-authproxy/test-long-context-authproxy-output.png)
+![LLM Long Context - training output](llm-test/assets/output-llm-long-context-training/output-llm-long-context-training.png)
+![Long Context - test_long_context_clinical_trial output](rlm-test/assets/test-long-context-clinical-trial/test-long-context-clinical-trial-output.png)
+![Clinical LLM - clinical-llm.py output](llm-test/assets/clinical-llm/clinical-llm-output.png)
+
 ## License
 
 This repository is unlicensed and intended for experimentation and comparison work.
