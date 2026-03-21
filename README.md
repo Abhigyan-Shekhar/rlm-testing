@@ -1,6 +1,6 @@
 # RLM vs LLM Test Repo
 
-This repository compares two ways of solving the same tasks with `gemini-2.5-flash-lite`:
+This repository compares two ways of solving the same tasks with Gemini models:
 
 - `llm-test/`: direct Gemini calls through `google.generativeai`
 - `rlm-test/`: RLM-driven runs with iteration, REPL access, and optional recursive tool use
@@ -18,6 +18,7 @@ rlm-testing/
 │   ├── clinical-llm.py
 │   ├── test_launch_note_app.py
 │   ├── test_pdf_cersei_warning.py
+│   ├── test_tsp_llm_only.py
 │   ├── llm-testing-1-parth.md
 │   ├── llm-test2.py-parth.md
 │   ├── clinical-llm-output.md
@@ -25,6 +26,7 @@ rlm-testing/
 │   ├── llm-app-eval.md
 │   ├── test_launch_note_app.md
 │   ├── test_pdf_cersei_warning.md
+│   ├── test_tsp_llm_only.md
 │   └── assets/
 └── rlm-test/
     ├── test_got.py
@@ -32,6 +34,7 @@ rlm-testing/
     ├── test_long_context_clinical_trial.py
     ├── test_launch_note_app.py
     ├── test_pdf_cersei_warning.py
+    ├── test_tsp_branch_bound.py
     ├── test1-in-rlms.md
     ├── test2-rlms.md
     ├── test3-rlms.md
@@ -39,11 +42,13 @@ rlm-testing/
     ├── clincal-rlm-output.md
     ├── test_launch_note_app.md
     ├── test_pdf_cersei_warning.md
+    ├── test_tsp_branch_bound.md
     └── assets/
 ```
 
 Notes:
 
+- Most of the original tasks use `gemini-2.5-flash-lite`. The TSP hallucination benchmark was later switched to `gemini-2.5-flash`.
 - `llm-test/llm-app-eval.md` and `llm-test/test_launch_note_app.md` contain the same planning run content.
 - The PDF pair is not a perfect token-for-token apples-to-apples comparison:
   the direct LLM path uploads `GOT.pdf`, while the RLM path reads `e72f9f1f181a66887baa7270037c582e.txt`.
@@ -51,13 +56,14 @@ Notes:
 
 ## Test Groups
 
-The saved logs cover five task families:
+The saved logs cover six task families:
 
 1. Short reasoning: Battle of the Bastards ally identification
 2. Long-context retrieval: AuthProxy configuration questions
 3. Structured extraction: clinical trial record questions
 4. Planning: launch an AI note-taking app in 30 days
 5. PDF question answering: Cersei/Ned quote search
+6. Under-specified optimization: TSP branch-and-bound without a distance matrix
 
 ## Setup
 
@@ -93,6 +99,7 @@ python llm-test/test2_llm.py
 python llm-test/clinical-llm.py
 python llm-test/test_launch_note_app.py
 python llm-test/test_pdf_cersei_warning.py
+python llm-test/test_tsp_llm_only.py
 ```
 
 RLM:
@@ -103,6 +110,7 @@ uv run python rlm-test/test_long_context_authproxy.py
 uv run python rlm-test/test_long_context_clinical_trial.py
 uv run python rlm-test/test_launch_note_app.py
 uv run python rlm-test/test_pdf_cersei_warning.py
+uv run python rlm-test/test_tsp_branch_bound.py
 ```
 
 ## Recorded Results
@@ -187,6 +195,163 @@ Findings:
 - The direct LLM PDF path is also the most token-expensive run in the repo because the uploaded PDF contributes a very large prompt context.
 - The RLM run failed much more severely. The saved log shows repeated looping over a guessed quote, `Quote not found in the file.`, a `NameError: name 'FINAL' is not defined`, and a final emitted answer of `result`.
 - This is the clearest catastrophic failure case in the repository.
+
+### 6. TSP Branch-and-Bound With Missing Distance Matrix
+
+This benchmark was designed for hallucination detection, not for solving TSP itself.
+
+The prompt is intentionally under-specified:
+
+- it names 8 cities
+- it says the distance matrix is symmetric
+- it says the matrix obeys triangle inequality
+- but it never provides the actual distance values
+
+Because the matrix values are missing, the only correct outcome is to say that the problem cannot be solved as stated.
+
+#### Benchmark Goal
+
+The point of this benchmark is narrow and specific:
+
+- test whether a plain LLM invents missing data and pretends to solve the problem
+- compare that behavior against `RLM`
+
+This is not a benchmark of TSP search quality. It is a benchmark of whether the system notices that the task is unsolvable from the given prompt.
+
+#### Harness Design
+
+We changed the TSP harness so both systems receive the same incomplete prompt.
+
+`rlm-test/test_tsp_branch_bound.py`:
+
+- prints the prompt
+- prints a hardcoded `expected_result` string for human comparison
+- runs a baseline Gemini call
+- runs `RLM` on the exact same prompt
+- uses `gemini-2.5-flash`
+- disables plain `llm_query` inside `RLM`
+- allows recursive `RLM` calls up to `3` total
+- sets `max_depth=3`
+- sets `max_iterations=6`
+
+Important detail:
+
+- the `expected_result` is hardcoded in the harness
+- it is not shown to either model
+- both the baseline and `RLM` receive only the under-specified prompt
+
+We also added `llm-test/test_tsp_llm_only.py`, which runs the same prompt with only the plain LLM. That made it easier to observe baseline-only behavior independently of the paired benchmark harness.
+
+| Run | Log | Outcome | Time | Token Data |
+| --- | --- | --- | --- | --- |
+| Direct LLM standalone | `llm-test/test_tsp_llm_only.md` | Incorrect: invents a distance matrix, explores fake branches, and reports an unsupported optimal tour of cost `52` | `97.285s` wall | `190` input / `4,388` output / `4,578` total |
+| Baseline LLM in paired TSP harness | `rlm-test/test_tsp_branch_bound.md` | Correct: explicitly says the distance matrix is missing and asks for it | `10.654s` wall | `190` input / `179` output / `369` total |
+| RLM | `rlm-test/test_tsp_branch_bound.md` | Correct final answer, but only after repeated iterations restating that the matrix is missing | `13.053s` wall / `12.768s` execution | `17,033` input / `486` output / `17,519` total |
+
+#### What We Tested
+
+We ran multiple versions of the same under-specified TSP prompt against `gemini-2.5-flash`.
+
+There were two kinds of behavior from the plain LLM:
+
+1. Grounded behavior:
+   it said the distance matrix was missing and refused to solve the problem.
+2. Hallucinated behavior:
+   it invented a distance matrix, performed fake branch-and-bound reasoning on top of that invented matrix, and then claimed an optimal tour and cost.
+
+So the baseline model was inconsistent.
+
+`RLM` behavior was more consistent in the runs we observed. It often printed `context`, checked what the prompt actually contained, recognized that the matrix was missing, and concluded that the task could not be solved as written.
+
+#### Run Outcomes
+
+Across the runs we observed:
+
+- Baseline LLM:
+  one run answered correctly and said the matrix was missing.
+- Baseline LLM:
+  at least two runs hallucinated a full matrix and a fake TSP solution.
+- Baseline LLM:
+  one extra run stalled or timed out and was unusable.
+- `RLM`:
+  multiple runs stayed grounded and said the matrix was missing.
+- `RLM`:
+  one run terminated cleanly with a final answer.
+- `RLM`:
+  one run reached the correct reasoning but later crashed on Gemini quota.
+- `RLM`:
+  another extra run also showed correct reasoning before quota interruption.
+
+The current pattern is:
+
+- plain LLM is unstable on this prompt
+- `RLM` is more consistently grounded on this prompt
+
+#### Important Technical Issues
+
+1. Model switching
+
+- the TSP benchmark was switched to `gemini-2.5-flash`
+
+2. Quota and provider issues
+
+- some runs failed due to `429 RESOURCE_EXHAUSTED`
+- some runs failed due to `503 UNAVAILABLE`
+- some runs failed due to `504 DEADLINE_EXCEEDED`
+- these were provider-side or quota-side failures, not reasoning results
+
+3. `RLM` termination issue
+
+- sometimes `RLM` reasoned correctly but did not terminate cleanly
+- when it failed to emit a recognized final answer, it fell back to `_default_answer`
+- that fallback triggered one more Gemini call
+- in some cases that extra call was the one that hit quota and crashed the run
+
+4. Long baseline calls
+
+- hallucinated baseline runs were often much longer because the model generated large fake derivations
+- grounded baseline runs were much shorter
+
+#### What We Learned
+
+1. The prompt is intentionally unsolvable as written.
+
+- no matrix values means no valid TSP solution exists
+
+2. Plain LLM can hallucinate the missing data.
+
+- not always, but definitely sometimes
+- it may invent a symmetric matrix
+- it may invent lower bounds
+- it may invent pruning logic
+- it may invent an optimal path and total cost
+
+3. `RLM` is more likely to inspect the actual context instead of inventing the missing matrix.
+
+- in the runs we observed, it repeatedly concluded that the distance matrix was missing
+- and therefore the TSP could not be solved
+
+4. This is evidence in favor of `RLM`, but not a perfect benchmark yet.
+
+- the baseline sometimes also answered correctly
+- so the prompt does not produce a clean `100%` separation
+- it shows a reliability difference, not an absolute one
+
+#### TSP-Specific Conclusion
+
+The most honest summary of this benchmark is:
+
+- we built an under-specified TSP benchmark
+- the correct answer is that the problem cannot be solved because the distance matrix is missing
+- baseline `gemini-2.5-flash` was inconsistent
+- baseline runs were sometimes grounded and sometimes hallucinated a full fake solution
+- `RLM` was more consistently grounded in the runs we observed
+- the experiment was partially limited by API instability and quota failures
+
+If someone asks what this TSP experiment showed, the accurate answer is not "`RLM` always wins." The better summary is:
+
+- on this under-specified prompt, plain LLM sometimes hallucinates missing structure
+- `RLM` more consistently notices the missing information and refuses to fabricate a solution
 
 ## Cersei Task Investigation
 
@@ -416,23 +581,26 @@ So far, the evidence is:
 
 ### Speed
 
-- The direct LLM path is faster on every logged task in this repository.
-- The speed gap is small on simple prompts and large on the heavier RLM runs, especially the PDF task.
+- In the paired benchmark runs, the direct LLM path is faster on every task in this repository.
+- The gap is small on simple prompts and large on the heavier RLM runs, especially the PDF and TSP branch-and-bound tasks.
+- The standalone TSP LLM-only run is a separate failure case where the model spent a long time hallucinating an invalid solution instead of refusing.
 
 ### Token Cost
 
-- On the short, long-context, clinical, and planning tasks, the direct LLM path is also much cheaper.
+- On the short, long-context, clinical, planning, and paired TSP tasks, the direct LLM path is also much cheaper.
 - The main exception is the PDF task: the direct LLM log records `195,109` total tokens because it uploads the full PDF, while the RLM text-based run records `141,006`.
+- The TSP benchmark also shows that direct prompting can still become expensive when it hallucinates a full worked solution to an under-specified problem, but the paired RLM run is far more expensive.
 - Even in that exception, the direct LLM path still finishes much sooner.
 
 ### Reliability
 
-- The direct LLM path is more reliable overall in the saved benchmarks.
+- The direct LLM path is more reliable overall on the original task set, but the TSP hallucination benchmark is an important counterexample.
 - RLM failure modes in these logs include:
   - task drift to an unrelated prompt
   - post-answer reporting crashes
   - blank required fields in structured output
   - looping and format-control failures that end in unusable answers
+- The TSP benchmark adds a different reliability signal: plain prompting can confidently fabricate missing problem data, while `RLM` appears more consistently grounded on this under-specified prompt, though at much higher cost and with occasional quota-interrupted runs.
 
 ### Where RLM Still Helps
 
@@ -447,6 +615,7 @@ Based on the saved `.md` artifacts in this repo:
 - RLM remains useful as an instrumentation-heavy experimental path, especially when you want to inspect how an agent failed.
 - The planning task is the closest thing to a neutral result: both paths produce usable output, but the direct LLM path does so with much lower cost.
 - The PDF task is the strongest warning case for both approaches: the direct LLM path is fast but returns the wrong speaker, and the RLM path collapses entirely.
+- The TSP task adds a more favorable case for `RLM`: on this under-specified prompt, plain LLM sometimes hallucinates missing structure, while `RLM` more consistently notices the missing information and refuses to fabricate a solution. That is evidence in favor of `RLM`, but it is still a reliability difference rather than a clean absolute win.
 
 ## Saved Screenshots
 
