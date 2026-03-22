@@ -18,6 +18,7 @@ rlm-testing/
 │   ├── clinical-llm.py
 │   ├── test_launch_note_app.py
 │   ├── test_pdf_cersei_warning.py
+│   ├── test_stochastic_tsp_adaptive_llm_only.py
 │   ├── test_tsp_llm_only.py
 │   ├── llm-testing-1-parth.md
 │   ├── llm-test2.py-parth.md
@@ -26,6 +27,7 @@ rlm-testing/
 │   ├── llm-app-eval.md
 │   ├── test_launch_note_app.md
 │   ├── test_pdf_cersei_warning.md
+│   ├── test_stochastic_tsp_adaptive_llm_only.md
 │   ├── test_tsp_llm_only.md
 │   └── assets/
 └── rlm-test/
@@ -34,6 +36,7 @@ rlm-testing/
     ├── test_long_context_clinical_trial.py
     ├── test_launch_note_app.py
     ├── test_pdf_cersei_warning.py
+    ├── test_stochastic_tsp_adaptive.py
     ├── test_tsp_branch_bound.py
     ├── test1-in-rlms.md
     ├── test2-rlms.md
@@ -42,6 +45,7 @@ rlm-testing/
     ├── clincal-rlm-output.md
     ├── test_launch_note_app.md
     ├── test_pdf_cersei_warning.md
+    ├── test_stochastic_tsp_adaptive.md
     ├── test_tsp_branch_bound.md
     └── assets/
 ```
@@ -49,14 +53,16 @@ rlm-testing/
 Notes:
 
 - Most of the original tasks use `gemini-2.5-flash-lite`. The TSP hallucination benchmark was later switched to `gemini-2.5-flash`.
+- The stochastic adaptive TSP benchmark also uses `gemini-2.5-flash`.
 - `llm-test/llm-app-eval.md` and `llm-test/test_launch_note_app.md` contain the same planning run content.
 - The PDF pair is not a perfect token-for-token apples-to-apples comparison:
   the direct LLM path uploads `GOT.pdf`, while the RLM path reads `e72f9f1f181a66887baa7270037c582e.txt`.
 - The Cersei/PDF investigation went through multiple harness and runtime changes. The saved `.md` files show important intermediate failures, but they do not represent one single stable final configuration.
+- The combined stochastic adaptive TSP terminal capture was truncated in the middle, so its saved `.md` log preserves only the visible portions that were actually captured.
 
 ## Test Groups
 
-The saved logs cover six task families:
+The saved logs cover seven task families:
 
 1. Short reasoning: Battle of the Bastards ally identification
 2. Long-context retrieval: AuthProxy configuration questions
@@ -64,6 +70,7 @@ The saved logs cover six task families:
 4. Planning: launch an AI note-taking app in 30 days
 5. PDF question answering: Cersei/Ned quote search
 6. Under-specified optimization: TSP branch-and-bound without a distance matrix
+7. Fully specified stochastic optimization: adaptive 5-city TSP with local random multipliers
 
 ## Setup
 
@@ -99,6 +106,7 @@ python llm-test/test2_llm.py
 python llm-test/clinical-llm.py
 python llm-test/test_launch_note_app.py
 python llm-test/test_pdf_cersei_warning.py
+python llm-test/test_stochastic_tsp_adaptive_llm_only.py
 python llm-test/test_tsp_llm_only.py
 ```
 
@@ -110,6 +118,7 @@ uv run python rlm-test/test_long_context_authproxy.py
 uv run python rlm-test/test_long_context_clinical_trial.py
 uv run python rlm-test/test_launch_note_app.py
 uv run python rlm-test/test_pdf_cersei_warning.py
+uv run python rlm-test/test_stochastic_tsp_adaptive.py
 uv run python rlm-test/test_tsp_branch_bound.py
 ```
 
@@ -353,6 +362,41 @@ If someone asks what this TSP experiment showed, the accurate answer is not "`RL
 - on this under-specified prompt, plain LLM sometimes hallucinates missing structure
 - `RLM` more consistently notices the missing information and refuses to fabricate a solution
 
+### 7. Stochastic Adaptive TSP
+
+This benchmark is different from the under-specified TSP case above. Here the problem is fully specified: there are 5 cities, fixed bidirectional base costs, and a stochastic multiplier that is revealed at each city on arrival. The task is to derive an optimal adaptive policy and compute its exact expected cost.
+
+Unlike the missing-matrix benchmark, this task does not currently have an independently verified reference answer in the repository. The saved logs are still useful, but they primarily show stability, consistency, and execution behavior rather than a confirmed correctness ranking.
+
+`llm-test/test_stochastic_tsp_adaptive_llm_only.py` runs the prompt with only the direct LLM.
+
+`rlm-test/test_stochastic_tsp_adaptive.py` runs the same prompt in a paired harness with:
+
+- a baseline Gemini call
+- `RLM` on the same prompt
+- `gemini-2.5-flash`
+- plain `llm_query` disabled inside `RLM`
+- `max_depth=3`
+- `max_recursive_calls=3`
+- `max_iterations=6`
+
+The combined `baseline + RLM` terminal stream was truncated in the middle during capture. The saved markdown log preserves only the visible sections that were actually captured.
+
+| Run | Log | Outcome | Time | Token Data |
+| --- | --- | --- | --- | --- |
+| Direct LLM standalone | `llm-test/test_stochastic_tsp_adaptive_llm_only.md` | Returned a full DP-style derivation and policy, claiming exact expected cost `32.5563` | `85.612s` wall | `300` input / `6,132` output / `6,432` total |
+| Baseline LLM in paired stochastic harness | `rlm-test/test_stochastic_tsp_adaptive.md` | Returned a different DP-style derivation, claiming expected cost `20.375`; saved terminal output is truncated after the start of the policy listing | `63.454s` wall | `300` input / `4,949` output / `5,249` total |
+| RLM | `rlm-test/test_stochastic_tsp_adaptive.md` | Hit an intermediate `NameError`, recovered, and returned a third answer claiming exact expected cost `22.7188` | `91.699s` wall / `91.452s` execution | `80,103` input / `11,336` output / `91,439` total |
+
+Findings:
+
+- The same stochastic TSP prompt produced materially different expected-cost answers across runs: `32.5563`, `20.375`, and `22.7188`.
+- That spread is large enough that the main result of this benchmark, as currently logged, is instability rather than trustworthy exact optimization.
+- The baseline LLM is inconsistent even before comparing it to `RLM`: the standalone run and the paired-harness baseline run disagree sharply on the claimed optimal value.
+- `RLM` adds a third different answer and also shows execution fragility in the visible trace: it first raised `NameError: name 'frozenset' is not defined`, then attempted a bad import (`from frozenset import frozenset`), and still proceeded to a final answer.
+- On cost and runtime, `RLM` is far more expensive here. Its saved run used about `91k` total tokens versus about `5k` to `6k` for the direct-LLM runs.
+- Because the repository does not yet include a verified ground-truth solution for this stochastic benchmark, the current evidence does not support claiming that either path is correct. It only supports claiming that both paths are unstable on this exact-policy task, with `RLM` being much more expensive.
+
 ## Cersei Task Investigation
 
 This section captures what we actually did on the Cersei/Ned quote task beyond the single saved log files.
@@ -582,7 +626,7 @@ So far, the evidence is:
 ### Speed
 
 - In the paired benchmark runs, the direct LLM path is faster on every task in this repository.
-- The gap is small on simple prompts and large on the heavier RLM runs, especially the PDF and TSP branch-and-bound tasks.
+- The gap is small on simple prompts and large on the heavier RLM runs, especially the PDF and both TSP benchmarks.
 - The standalone TSP LLM-only run is a separate failure case where the model spent a long time hallucinating an invalid solution instead of refusing.
 
 ### Token Cost
@@ -590,6 +634,7 @@ So far, the evidence is:
 - On the short, long-context, clinical, planning, and paired TSP tasks, the direct LLM path is also much cheaper.
 - The main exception is the PDF task: the direct LLM log records `195,109` total tokens because it uploads the full PDF, while the RLM text-based run records `141,006`.
 - The TSP benchmark also shows that direct prompting can still become expensive when it hallucinates a full worked solution to an under-specified problem, but the paired RLM run is far more expensive.
+- The stochastic adaptive TSP benchmark is an even stronger version of the same pattern: the saved `RLM` run used `91,439` total tokens, versus `5,249` and `6,432` for the direct-LLM runs.
 - Even in that exception, the direct LLM path still finishes much sooner.
 
 ### Reliability
@@ -600,7 +645,8 @@ So far, the evidence is:
   - post-answer reporting crashes
   - blank required fields in structured output
   - looping and format-control failures that end in unusable answers
-- The TSP benchmark adds a different reliability signal: plain prompting can confidently fabricate missing problem data, while `RLM` appears more consistently grounded on this under-specified prompt, though at much higher cost and with occasional quota-interrupted runs.
+- The missing-matrix TSP benchmark adds a different reliability signal: plain prompting can confidently fabricate missing problem data, while `RLM` appears more consistently grounded on that under-specified prompt, though at much higher cost and with occasional quota-interrupted runs.
+- The stochastic adaptive TSP benchmark adds the opposite kind of warning: on a fully specified exact-policy problem, the repository currently shows three materially different numeric answers and no verified reference solution, so neither path should be treated as trustworthy yet.
 
 ### Where RLM Still Helps
 
@@ -616,6 +662,7 @@ Based on the saved `.md` artifacts in this repo:
 - The planning task is the closest thing to a neutral result: both paths produce usable output, but the direct LLM path does so with much lower cost.
 - The PDF task is the strongest warning case for both approaches: the direct LLM path is fast but returns the wrong speaker, and the RLM path collapses entirely.
 - The TSP task adds a more favorable case for `RLM`: on this under-specified prompt, plain LLM sometimes hallucinates missing structure, while `RLM` more consistently notices the missing information and refuses to fabricate a solution. That is evidence in favor of `RLM`, but it is still a reliability difference rather than a clean absolute win.
+- The stochastic adaptive TSP task adds a different limitation: exact optimization under uncertainty is currently unstable for both paths in these logs, and the repo does not yet contain enough verified evidence to say which reported value is actually correct.
 
 ## Saved Screenshots
 
