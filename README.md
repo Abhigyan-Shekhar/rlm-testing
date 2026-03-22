@@ -366,7 +366,14 @@ If someone asks what this TSP experiment showed, the accurate answer is not "`RL
 
 This benchmark is different from the under-specified TSP case above. Here the problem is fully specified: there are 5 cities, fixed bidirectional base costs, and a stochastic multiplier that is revealed at each city on arrival. The task is to derive an optimal adaptive policy and compute its exact expected cost.
 
-Unlike the missing-matrix benchmark, this task does not currently have an independently verified reference answer in the repository. The saved logs are still useful, but they primarily show stability, consistency, and execution behavior rather than a confirmed correctness ranking.
+Using backward induction / dynamic programming, the reference answer for this task is:
+
+- exact expected optimal cost: `22.75`
+- first move from `A`:
+  - if `m_A = 0.5`, go to `C`
+  - if `m_A = 2.0`, go to `B`
+
+That gives us a concrete correctness target for the saved runs below.
 
 `llm-test/test_stochastic_tsp_adaptive_llm_only.py` runs the prompt with only the direct LLM.
 
@@ -384,18 +391,19 @@ The combined `baseline + RLM` terminal stream was truncated in the middle during
 
 | Run | Log | Outcome | Time | Token Data |
 | --- | --- | --- | --- | --- |
-| Direct LLM standalone | `llm-test/test_stochastic_tsp_adaptive_llm_only.md` | Returned a full DP-style derivation and policy, claiming exact expected cost `32.5563` | `85.612s` wall | `300` input / `6,132` output / `6,432` total |
-| Baseline LLM in paired stochastic harness | `rlm-test/test_stochastic_tsp_adaptive.md` | Returned a different DP-style derivation, claiming expected cost `20.375`; saved terminal output is truncated after the start of the policy listing | `63.454s` wall | `300` input / `4,949` output / `5,249` total |
-| RLM | `rlm-test/test_stochastic_tsp_adaptive.md` | Hit an intermediate `NameError`, recovered, and returned a third answer claiming exact expected cost `22.7188` | `91.699s` wall / `91.452s` execution | `80,103` input / `11,336` output / `91,439` total |
+| Direct LLM standalone | `llm-test/test_stochastic_tsp_adaptive_llm_only.md` | Incorrect: returned a full DP-style derivation and policy, but claimed exact expected cost `32.5563` instead of `22.75` | `85.612s` wall | `300` input / `6,132` output / `6,432` total |
+| Baseline LLM in paired stochastic harness | `rlm-test/test_stochastic_tsp_adaptive.md` | Incorrect: returned a different DP-style derivation, claiming expected cost `20.375`; saved terminal output is truncated after the start of the policy listing | `63.454s` wall | `300` input / `4,949` output / `5,249` total |
+| RLM | `rlm-test/test_stochastic_tsp_adaptive.md` | Closest run, but still not exact: after an intermediate `NameError`, it returned `22.7188` instead of `22.75` | `91.699s` wall / `91.452s` execution | `80,103` input / `11,336` output / `91,439` total |
 
 Findings:
 
-- The same stochastic TSP prompt produced materially different expected-cost answers across runs: `32.5563`, `20.375`, and `22.7188`.
-- That spread is large enough that the main result of this benchmark, as currently logged, is instability rather than trustworthy exact optimization.
-- The baseline LLM is inconsistent even before comparing it to `RLM`: the standalone run and the paired-harness baseline run disagree sharply on the claimed optimal value.
-- `RLM` adds a third different answer and also shows execution fragility in the visible trace: it first raised `NameError: name 'frozenset' is not defined`, then attempted a bad import (`from frozenset import frozenset`), and still proceeded to a final answer.
+- The verified exact expected cost is `22.75`.
+- The same stochastic TSP prompt produced materially different claimed answers across runs: `32.5563`, `20.375`, and `22.7188`.
+- Both direct-LLM runs are incorrect, and they are also inconsistent with each other.
+- `RLM` is numerically much closer to the verified answer than either direct-LLM run, but it is still not exact, so this cannot be counted as a full success on a task that explicitly asks for the exact expected cost.
+- `RLM` also shows execution fragility in the visible trace: it first raised `NameError: name 'frozenset' is not defined`, then attempted a bad import (`from frozenset import frozenset`), and still proceeded to a final answer.
 - On cost and runtime, `RLM` is far more expensive here. Its saved run used about `91k` total tokens versus about `5k` to `6k` for the direct-LLM runs.
-- Because the repository does not yet include a verified ground-truth solution for this stochastic benchmark, the current evidence does not support claiming that either path is correct. It only supports claiming that both paths are unstable on this exact-policy task, with `RLM` being much more expensive.
+- The honest reading of this benchmark is: `RLM` outperformed direct LLM on answer quality for this task, but neither system produced the exact correct answer in the saved runs, and `RLM` paid a very large latency and token penalty to get closer.
 
 ## Cersei Task Investigation
 
@@ -646,7 +654,7 @@ So far, the evidence is:
   - blank required fields in structured output
   - looping and format-control failures that end in unusable answers
 - The missing-matrix TSP benchmark adds a different reliability signal: plain prompting can confidently fabricate missing problem data, while `RLM` appears more consistently grounded on that under-specified prompt, though at much higher cost and with occasional quota-interrupted runs.
-- The stochastic adaptive TSP benchmark adds the opposite kind of warning: on a fully specified exact-policy problem, the repository currently shows three materially different numeric answers and no verified reference solution, so neither path should be treated as trustworthy yet.
+- The stochastic adaptive TSP benchmark now has a verified target value of `22.75`: both direct-LLM runs are wrong, while `RLM` is much closer but still not exact and also suffers from visible execution errors.
 
 ### Where RLM Still Helps
 
@@ -662,7 +670,7 @@ Based on the saved `.md` artifacts in this repo:
 - The planning task is the closest thing to a neutral result: both paths produce usable output, but the direct LLM path does so with much lower cost.
 - The PDF task is the strongest warning case for both approaches: the direct LLM path is fast but returns the wrong speaker, and the RLM path collapses entirely.
 - The TSP task adds a more favorable case for `RLM`: on this under-specified prompt, plain LLM sometimes hallucinates missing structure, while `RLM` more consistently notices the missing information and refuses to fabricate a solution. That is evidence in favor of `RLM`, but it is still a reliability difference rather than a clean absolute win.
-- The stochastic adaptive TSP task adds a different limitation: exact optimization under uncertainty is currently unstable for both paths in these logs, and the repo does not yet contain enough verified evidence to say which reported value is actually correct.
+- The stochastic adaptive TSP task adds a different kind of result: `RLM` is clearly better than the direct-LLM runs on answer quality because it comes closest to the verified exact value `22.75`, but it still misses the exact answer and is vastly more expensive.
 
 ## Saved Screenshots
 
