@@ -29,6 +29,7 @@ rlm-testing/
 │   ├── test_pdf_cersei_warning.md
 │   ├── test_stochastic_tsp_adaptive_llm_only.md
 │   ├── test_tsp_llm_only.md
+│   ├── test_tsp_llm_only_additional_run.md
 │   └── assets/
 └── rlm-test/
     ├── test_got.py
@@ -47,6 +48,7 @@ rlm-testing/
     ├── test_pdf_cersei_warning.md
     ├── test_stochastic_tsp_adaptive.md
     ├── test_tsp_branch_bound.md
+    ├── test_tsp_branch_bound_additional_run.md
     └── assets/
 ```
 
@@ -256,6 +258,9 @@ We also added `llm-test/test_tsp_llm_only.py`, which runs the same prompt with o
 | Direct LLM standalone | `llm-test/test_tsp_llm_only.md` | Incorrect: invents a distance matrix, explores fake branches, and reports an unsupported optimal tour of cost `52` | `97.285s` wall | `190` input / `4,388` output / `4,578` total |
 | Baseline LLM in paired TSP harness | `rlm-test/test_tsp_branch_bound.md` | Correct: explicitly says the distance matrix is missing and asks for it | `10.654s` wall | `190` input / `179` output / `369` total |
 | RLM | `rlm-test/test_tsp_branch_bound.md` | Correct final answer, but only after repeated iterations restating that the matrix is missing | `13.053s` wall / `12.768s` execution | `17,033` input / `486` output / `17,519` total |
+| Direct LLM standalone (additional captured run) | `llm-test/test_tsp_llm_only_additional_run.md` | Incorrect: hallucinates a more elaborate branch-and-bound solution, claiming optimal cost `74` | `97.364s` wall | `190` input / `6,171` output / `6,361` total |
+| Baseline LLM in paired TSP harness (additional captured run) | `rlm-test/test_tsp_branch_bound_additional_run.md` | Incorrect: again hallucinates a full branch-and-bound solution, claiming optimal cost `74` | `97.364s` wall | `190` input / `6,171` output / `6,361` total |
+| RLM (additional captured run) | `rlm-test/test_tsp_branch_bound_additional_run.md` | Grounded refusal again, but final output contains a literal `f"{missing_info_message}..."` formatting bug | `15.270s` wall / `15.140s` execution | `12,959` input / `275` output / `13,234` total |
 
 #### What We Tested
 
@@ -281,11 +286,15 @@ Across the runs we observed:
 - Baseline LLM:
   at least two runs hallucinated a full matrix and a fake TSP solution.
 - Baseline LLM:
+  the additional captured run hallucinated a different and more elaborate branch-and-bound solution, claiming cost `74`.
+- Baseline LLM:
   one extra run stalled or timed out and was unusable.
 - `RLM`:
   multiple runs stayed grounded and said the matrix was missing.
 - `RLM`:
   one run terminated cleanly with a final answer.
+- `RLM`:
+  the additional captured run again stayed grounded, but emitted a literal `f"{missing_info_message}..."` string in the final answer due to formatting.
 - `RLM`:
   one run reached the correct reasoning but later crashed on Gemini quota.
 - `RLM`:
@@ -334,11 +343,13 @@ The current pattern is:
 - it may invent lower bounds
 - it may invent pruning logic
 - it may invent an optimal path and total cost
+- in the captured runs so far, those invented optimal costs include `52` and `74`
 
 3. `RLM` is more likely to inspect the actual context instead of inventing the missing matrix.
 
 - in the runs we observed, it repeatedly concluded that the distance matrix was missing
 - and therefore the TSP could not be solved
+- however, one additional captured run shows that RLM can still fail at output formatting even when the underlying reasoning stays grounded
 
 4. This is evidence in favor of `RLM`, but not a perfect benchmark yet.
 
@@ -353,8 +364,9 @@ The most honest summary of this benchmark is:
 - we built an under-specified TSP benchmark
 - the correct answer is that the problem cannot be solved because the distance matrix is missing
 - baseline `gemini-2.5-flash` was inconsistent
-- baseline runs were sometimes grounded and sometimes hallucinated a full fake solution
+- baseline runs were sometimes grounded and sometimes hallucinated full fake solutions, including different invented optimal costs
 - `RLM` was more consistently grounded in the runs we observed
+- `RLM` still showed a formatting bug in one additional captured run, so better grounding did not always translate to a clean final answer
 - the experiment was partially limited by API instability and quota failures
 
 If someone asks what this TSP experiment showed, the accurate answer is not "`RLM` always wins." The better summary is:
