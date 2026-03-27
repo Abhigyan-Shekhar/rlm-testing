@@ -12,6 +12,9 @@ All metrics and findings below are taken from the saved markdown logs in this re
 ```text
 rlm-testing/
 ├── README.md
+├── benchmark_rerun_authproxy.md
+├── benchmark_rerun_stochastic_tsp.md
+├── benchmark_rerun_tsp.md
 ├── llm-test/
 │   ├── test_llm.py
 │   ├── test2_llm.py
@@ -56,6 +59,7 @@ Notes:
 
 - Most of the original tasks use `gemini-2.5-flash-lite`. The TSP hallucination benchmark was later switched to `gemini-2.5-flash`.
 - The stochastic adaptive TSP benchmark also uses `gemini-2.5-flash`.
+- The `benchmark_rerun_*.md` files record later reruns and should be read as updates to the original saved benchmark snapshots.
 - `llm-test/llm-app-eval.md` and `llm-test/test_launch_note_app.md` contain the same planning run content.
 - The PDF pair is not a perfect token-for-token apples-to-apples comparison:
   the direct LLM path uploads `GOT.pdf`, while the RLM path reads `e72f9f1f181a66887baa7270037c582e.txt`.
@@ -153,12 +157,15 @@ This task asks targeted questions from a noisy long document.
 | --- | --- | --- | --- | --- |
 | Direct LLM | `llm-test/output for llm long context training.md` | Correct on `A1` through `A5` | `1.463s` | `1,512` total |
 | RLM | `rlm-test/output for long context problem.md` | Wrong final output: `10` | `13.171s` wall / `13.005s` execution | `11,003` total |
+| Baseline LLM rerun | `benchmark_rerun_authproxy.md` | Passed cleanly again: returned correct answers for `Q1` through `Q5` in the required format | `1.127s` wall | `1,443` input / `66` output / `1,509` total |
+| RLM rerun | `benchmark_rerun_authproxy.md` | Recovered the right facts indirectly, but failed the benchmark format and final-answer discipline | `13.941s` wall / `11.613s` execution | `15,330` input / `1,628` output / `16,958` total |
 
 Findings:
 
 - The direct LLM run answered all five questions correctly.
 - The RLM run consumed substantially more time and tokens but collapsed to a single wrong value.
 - This is a clear case where extra agent machinery did not improve retrieval quality.
+- The rerun reinforces the same conclusion more strongly: the plain `LLM` again passed cleanly, while `RLM` extracted the right facts only indirectly and still failed the required Q1-Q5 answer format.
 
 ### 3. Clinical Long-Context Extraction
 
@@ -261,6 +268,8 @@ We also added `llm-test/test_tsp_llm_only.py`, which runs the same prompt with o
 | Direct LLM standalone (additional captured run) | `llm-test/test_tsp_llm_only_additional_run.md` | Incorrect: hallucinates a more elaborate branch-and-bound solution, claiming optimal cost `74` | `97.364s` wall | `190` input / `6,171` output / `6,361` total |
 | Baseline LLM in paired TSP harness (additional captured run) | `rlm-test/test_tsp_branch_bound_additional_run.md` | Incorrect: again hallucinates a full branch-and-bound solution, claiming optimal cost `74` | `97.364s` wall | `190` input / `6,171` output / `6,361` total |
 | RLM (additional captured run) | `rlm-test/test_tsp_branch_bound_additional_run.md` | Grounded refusal again, but final output contains a literal `f"{missing_info_message}..."` formatting bug | `15.270s` wall / `15.140s` execution | `12,959` input / `275` output / `13,234` total |
+| Baseline LLM rerun | `benchmark_rerun_tsp.md` | Gemini API call stalled and produced no usable completion | N/A | N/A |
+| RLM rerun | `benchmark_rerun_tsp.md` | Grounded refusal again: correctly identified the missing distance matrix and refused to fabricate a tour | `20.25s` execution | `24,367` input / `1,006` output / `25,373` total |
 
 #### What We Tested
 
@@ -296,6 +305,8 @@ Across the runs we observed:
 - `RLM`:
   the additional captured run again stayed grounded, but emitted a literal `f"{missing_info_message}..."` string in the final answer due to formatting.
 - `RLM`:
+  the latest rerun again completed with a grounded refusal and no fabricated tour.
+- `RLM`:
   one run reached the correct reasoning but later crashed on Gemini quota.
 - `RLM`:
   another extra run also showed correct reasoning before quota interruption.
@@ -304,6 +315,7 @@ The current pattern is:
 
 - plain LLM is unstable on this prompt
 - `RLM` is more consistently grounded on this prompt
+- the latest rerun widens that contrast because the baseline stalled while `RLM` still completed with the correct refusal behavior
 
 #### Important Technical Issues
 
@@ -406,6 +418,7 @@ The combined `baseline + RLM` terminal stream was truncated in the middle during
 | Direct LLM standalone | `llm-test/test_stochastic_tsp_adaptive_llm_only.md` | Incorrect: returned a full DP-style derivation and policy, but claimed exact expected cost `32.5563` instead of `22.75` | `85.612s` wall | `300` input / `6,132` output / `6,432` total |
 | Baseline LLM in paired stochastic harness | `rlm-test/test_stochastic_tsp_adaptive.md` | Incorrect: returned a different DP-style derivation, claiming expected cost `20.375`; saved terminal output is truncated after the start of the policy listing | `63.454s` wall | `300` input / `4,949` output / `5,249` total |
 | RLM | `rlm-test/test_stochastic_tsp_adaptive.md` | Closest run, but still not exact: after an intermediate `NameError`, it returned `22.7188` instead of `22.75` | `91.699s` wall / `91.452s` execution | `80,103` input / `11,336` output / `91,439` total |
+| RLM rerun metrics snapshot | `benchmark_rerun_stochastic_tsp.md` | Metrics-only rerun note; full terminal output was not preserved, so no new correctness judgment is added from this rerun alone | `73.576s` wall / `73.378s` execution | `14,740` input / `3,328` output / `18,068` total |
 
 Findings:
 
@@ -416,6 +429,7 @@ Findings:
 - `RLM` also shows execution fragility in the visible trace: it first raised `NameError: name 'frozenset' is not defined`, then attempted a bad import (`from frozenset import frozenset`), and still proceeded to a final answer.
 - On cost and runtime, `RLM` is far more expensive here. Its saved run used about `91k` total tokens versus about `5k` to `6k` for the direct-LLM runs.
 - The honest reading of this benchmark is: `RLM` outperformed direct LLM on answer quality for this task, but neither system produced the exact correct answer in the saved runs, and `RLM` paid a very large latency and token penalty to get closer.
+- The later rerun note adds only aggregate `RLM` metrics, not a preserved final answer, so it is useful as a cost snapshot but not as a new correctness datapoint.
 
 ## Cersei Task Investigation
 
@@ -655,6 +669,7 @@ So far, the evidence is:
 - The main exception is the PDF task: the direct LLM log records `195,109` total tokens because it uploads the full PDF, while the RLM text-based run records `141,006`.
 - The TSP benchmark also shows that direct prompting can still become expensive when it hallucinates a full worked solution to an under-specified problem, but the paired RLM run is far more expensive.
 - The stochastic adaptive TSP benchmark is an even stronger version of the same pattern: the saved `RLM` run used `91,439` total tokens, versus `5,249` and `6,432` for the direct-LLM runs.
+- The auth proxy rerun continues the same pattern: `RLM` used `16,958` total tokens versus `1,509` for the plain `LLM`, even though the plain `LLM` produced the cleaner benchmark answer.
 - Even in that exception, the direct LLM path still finishes much sooner.
 
 ### Reliability
@@ -666,6 +681,7 @@ So far, the evidence is:
   - blank required fields in structured output
   - looping and format-control failures that end in unusable answers
 - The missing-matrix TSP benchmark adds a different reliability signal: plain prompting can confidently fabricate missing problem data, while `RLM` appears more consistently grounded on that under-specified prompt, though at much higher cost and with occasional quota-interrupted runs.
+- The latest missing-matrix TSP rerun strengthens that pattern: the baseline stalled completely, while `RLM` still completed with the correct refusal behavior.
 - The stochastic adaptive TSP benchmark now has a verified target value of `22.75`: both direct-LLM runs are wrong, while `RLM` is much closer but still not exact and also suffers from visible execution errors.
 
 ### Where RLM Still Helps
@@ -723,3 +739,14 @@ From `rlm-test/test3-rlms.md`:
 ## License
 
 This repository is unlicensed and intended for experimentation and comparison work.
+
+## Latest Local Reruns
+
+These notes mirror the latest markdown benchmark reruns recorded in the working repo and should be treated as the most up-to-date local snapshots for these tasks.
+
+- Under-specified TSP rerun note: [`benchmark_rerun_tsp.md`](./benchmark_rerun_tsp.md)
+  - Latest local note: baseline Gemini call stalled and had to be interrupted in one run, while the equivalent `RLM` reasoning path completed and correctly identified that the prompt was unsolvable because the distance matrix was missing.
+- Stochastic adaptive TSP rerun note: [`benchmark_rerun_stochastic_tsp.md`](./benchmark_rerun_stochastic_tsp.md)
+  - Latest local note: the recorded `RLM` run on `test_stochastic_tsp_adaptive.py` completed in `73.378s` with `14,740` input tokens and `3,328` output tokens (`18,068` total).
+- AuthProxy rerun note: [`benchmark_rerun_authproxy.md`](./benchmark_rerun_authproxy.md)
+  - Latest local note: on `gemini-2.5-flash-lite`, the baseline `LLM` answered all five questions correctly in `1.127s` using `1,443` input tokens and `66` output tokens, while the latest `RLM` run on `test_long_context_authproxy.py` did not cleanly answer Q1-Q5 and instead produced a muddled summary-oriented final answer after `13.941s` wall time with `15,330` input tokens and `1,628` output tokens.
